@@ -743,11 +743,11 @@ class SSHTransport {
             '(more than $_maxPreBannerLines)',
           );
         }
-        _buffer.consume(lineEnd);
+        _buffer.skip(lineEnd);
         continue;
       }
 
-      _buffer.consume(lineEnd);
+      _buffer.skip(lineEnd);
 
       // RFC compatibility: SSH-1.99 banners indicate SSH-2 support with SSH-1 fallback.
       if (!(versionString.startsWith('SSH-2.0-') ||
@@ -846,7 +846,7 @@ class SSHTransport {
     } on InvalidCipherTextException {
       throw SSHPacketError('AEAD authentication failed');
     }
-    _buffer.consume(encryptedPacketLength);
+    _buffer.skip(encryptedPacketLength);
 
     if (SSHPacket.readPacketLength(packet) != packetLength) {
       throw SSHPacketError('Decrypted packet length changed unexpectedly');
@@ -887,6 +887,12 @@ class SSHTransport {
       return null;
     }
 
+    // A copy (the default consume()), not a view: this path only runs
+    // before a cipher is negotiated, i.e. for the handful of small packets
+    // exchanged during the initial handshake, so the extra allocation is
+    // negligible. The returned payload is handed to an async handler that
+    // may hold onto it indefinitely, so it's not worth reasoning about
+    // whether aliasing the receive buffer would be safe here.
     final packet = _buffer.consume(packetLength + 4);
     final paddingLength = SSHPacket.readPaddingLength(packet);
     final payloadLength = packetLength - paddingLength - 1;
@@ -947,8 +953,11 @@ class SSHTransport {
       packetForMac.setRange(4, 4 + packetLength, encryptedPayload);
       _verifyPacketMac(packetForMac, mac, isEncrypted: true);
 
-      // Consume the packet and MAC from the buffer
-      _buffer.consume(4 + packetLength + macLength);
+      // Consume the packet and MAC from the buffer. The bytes we actually
+      // need (packetLengthBytes/encryptedPayload/mac) were already taken as
+      // views above and are fully used by this point, so there is nothing
+      // left to allocate here.
+      _buffer.skip(4 + packetLength + macLength);
 
       // Ensure the encrypted payload length is a multiple of the block size
       if (encryptedPayload.length % blockSize != 0) {
@@ -989,7 +998,9 @@ class SSHTransport {
       // For standard MAC algorithms, decrypt the packet first, then verify the MAC
 
       if (_decryptBuffer.isEmpty) {
-        final firstBlock = _buffer.consume(blockSize);
+        // A view is safe here: firstBlock is only read synchronously by
+        // process() below and never stored.
+        final firstBlock = _buffer.consumeView(blockSize);
         _decryptBuffer.add(_decryptCipher!.process(firstBlock));
       }
 
@@ -1002,17 +1013,22 @@ class SSHTransport {
       }
 
       while (_decryptBuffer.length < 4 + packetLength) {
-        final block = _buffer.consume(blockSize);
+        // Same as firstBlock above: read synchronously, never stored.
+        final block = _buffer.consumeView(blockSize);
         _decryptBuffer.add(_decryptCipher!.process(block));
       }
 
-      final packet = _decryptBuffer.consume(packetLength + 4);
+      // A view is safe here: _decryptBuffer only ever holds the decrypted
+      // blocks for the packet currently being assembled (at most one
+      // packet's worth), so aliasing it does not pin an unbounded amount
+      // of memory the way aliasing the raw receive buffer could.
+      final packet = _decryptBuffer.consumeView(packetLength + 4);
 
       // Authenticate before interpreting any attacker-controlled field of
       // the decrypted packet. Checking the padding length first would make
       // a padding error distinguishable from a MAC error, i.e. a padding
       // oracle.
-      final mac = _buffer.consume(macLength);
+      final mac = _buffer.consumeView(macLength);
       _verifyPacketMac(packet, mac, isEncrypted: false);
 
       final paddingLength = SSHPacket.readPaddingLength(packet);
@@ -1037,9 +1053,11 @@ class SSHTransport {
       return null;
     }
 
-    final aad = _buffer.consume(4);
-    final ciphertext = _buffer.consume(packetLength);
-    final tag = _buffer.consume(tagLength);
+    // Views are safe here: aad is only read synchronously by _processAead
+    // below, and ciphertext/tag are copied into encryptedInput immediately.
+    final aad = _buffer.consumeView(4);
+    final ciphertext = _buffer.consumeView(packetLength);
+    final tag = _buffer.consumeView(tagLength);
 
     final encryptedInput = Uint8List(packetLength + tagLength)
       ..setRange(0, packetLength, ciphertext)
