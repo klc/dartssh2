@@ -1,3 +1,7 @@
+// Uses dart:mirrors, which is VM-only.
+@TestOn('vm')
+library;
+
 import 'dart:async';
 import 'dart:mirrors';
 import 'dart:typed_data';
@@ -77,7 +81,8 @@ void main() {
   }
 
   group('T-05: padding is random', () {
-    test('ETM send path uses padding that is not all zero and differs '
+    test(
+        'ETM send path uses padding that is not all zero and differs '
         'between packets with identical payloads', () {
       final cipherType = SSHCipherType.aes128ctr;
       final macType = SSHMacType.hmacSha256Etm;
@@ -133,7 +138,8 @@ void main() {
       expect(firstPadding, isNot(equals(secondPadding)));
     });
 
-    test('AEAD send path uses padding that is not all zero and differs '
+    test(
+        'AEAD send path uses padding that is not all zero and differs '
         'between packets with identical payloads', () {
       for (final cipherType in [
         SSHCipherType.aes128gcm,
@@ -188,8 +194,7 @@ void main() {
     });
   });
 
-  group('T-05/T-12: non-ETM and ETM round trips still deliver the payload',
-      () {
+  group('T-05/T-12: non-ETM and ETM round trips still deliver the payload', () {
     Future<void> roundTrip({required bool useEtm}) async {
       final cipherType = SSHCipherType.aes128ctr;
       final macType = useEtm ? SSHMacType.hmacSha256Etm : SSHMacType.hmacSha256;
@@ -264,7 +269,8 @@ void main() {
     });
   });
 
-  group('T-09/T-11: malformed lengths raise SSHPacketError, not '
+  group(
+      'T-09/T-11: malformed lengths raise SSHPacketError, not '
       'RangeError/SSHInternalError', () {
     test('_verifyPacketLength rejects lengths below the 5 byte minimum', () {
       final socket = _CaptureSSHSocket();
@@ -295,7 +301,8 @@ void main() {
       transport.close();
     });
 
-    test('plaintext receive path raises SSHPacketError instead of a '
+    test(
+        'plaintext receive path raises SSHPacketError instead of a '
         'RangeError for a too-short packetLength', () {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
@@ -309,15 +316,16 @@ void main() {
       buffer.add(packet);
 
       expect(
-        () =>
-            reflect(transport).invoke(privateSymbol('_consumePacket'), const []),
+        () => reflect(transport)
+            .invoke(privateSymbol('_consumePacket'), const []),
         throwsA(isA<SSHPacketError>()),
       );
 
       transport.close();
     });
 
-    test('AEAD receive path rejects a padding length that would make the '
+    test(
+        'AEAD receive path rejects a padding length that would make the '
         'payload length negative (T-11)', () {
       for (final cipherType in [
         SSHCipherType.aes128gcm,
@@ -361,7 +369,8 @@ void main() {
   });
 
   group('T-12: MAC is checked before padding on the non-ETM path', () {
-    test('a packet with both an invalid padding length and a wrong MAC '
+    test(
+        'a packet with both an invalid padding length and a wrong MAC '
         'fails with a MAC error, not a padding error', () {
       final cipherType = SSHCipherType.aes128ctr;
       final macType = SSHMacType.hmacSha256;

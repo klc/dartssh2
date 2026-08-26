@@ -1,3 +1,10 @@
+// Contains an integer literal (1234567890123456789) that dart2js refuses to
+// compile because it can't be represented exactly as a JS number -- a
+// pre-existing issue unrelated to the 64-bit ByteData fix elsewhere in this
+// branch.
+@TestOn('vm')
+library;
+
 import 'dart:typed_data';
 
 import 'package:dartssh2/src/kex/kex_dh.dart';
@@ -117,7 +124,8 @@ void main() {
       }
     });
 
-    test('a legitimate f still produces the same shared secret as before '
+    test(
+        'a legitimate f still produces the same shared secret as before '
         '(no regression)', () {
       final kex1 = SSHKexDH.group14();
       final kex2 = SSHKexDH.group14();
