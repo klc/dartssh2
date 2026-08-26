@@ -11,6 +11,11 @@ abstract class SSHMessage {
   Uint8List encode();
 
   static int readMessageId(Uint8List bytes) {
+    if (bytes.isEmpty) {
+      throw SSHPacketError(
+        'Malformed packet: message payload is empty, cannot read message id',
+      );
+    }
     return bytes[0];
   }
 }
@@ -101,8 +106,13 @@ class SSHMessageReader {
 
   List<String> readNameList() {
     final string = utf8.decode(readString());
-    final list = string.split(',');
-    return list;
+    // RFC 4251 §5: a name-list is a comma-separated list encoded as a
+    // string; an empty name-list is thus a zero-length string. Without this
+    // check `''.split(',')` would incorrectly yield `['']`.
+    if (string.isEmpty) {
+      return const [];
+    }
+    return string.split(',');
   }
 
   List<Uint8List> readStringList() {
@@ -115,7 +125,17 @@ class SSHMessageReader {
 
   BigInt readMpint() {
     final magnitude = readString();
-    final value = decodeBigIntWithSign(1, magnitude);
+    // RFC 4251 §5: mpint is a two's-complement, big-endian encoded integer.
+    // The sign lives in the high bit of the first byte (when present), it
+    // is not a separate out-of-band flag, so it must be inferred from the
+    // wire bytes rather than assumed to always be positive. An empty
+    // magnitude represents zero.
+    final sign = magnitude.isEmpty
+        ? 0
+        : (magnitude[0] & 0x80) != 0
+            ? -1
+            : 1;
+    final value = decodeBigIntWithSign(sign, magnitude);
     return value;
   }
 
@@ -176,6 +196,15 @@ class SSHMessageWriter {
 
   /// Write multiple precision integer as a string.
   void writeMpint(BigInt value) {
+    // RFC 4251 §5: the mpint encoding of zero is a string of zero length
+    // (i.e. just the 4-byte length prefix `00 00 00 00`), not a single zero
+    // byte. `encodeBigInt` follows ASN.1/DER INTEGER conventions instead
+    // (used by non-mpint callers), so zero is special-cased here rather
+    // than changing that shared helper's semantics.
+    if (value == BigInt.zero) {
+      writeUint32(0);
+      return;
+    }
     writeString(encodeBigInt(value));
   }
 
