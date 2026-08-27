@@ -19,6 +19,8 @@
 - Fixed an HTTP response body being discarded when the server sends no `Content-Length`. The body was read only up to a length that stayed 0, so whether it survived depended on TCP segment boundaries [#230].
 - Fixed `HttpHeaders.host` and `HttpHeaders.port` returning null for a perfectly valid `Host` header [#230].
 - Added overflow protection to the SFTP request id counter [#230].
+- Changed `ChunkBuffer` to grow by reallocating with headroom instead of copying the whole buffer on every append, making `add()` amortised O(1) rather than O(n). Accumulating 64 MB in 8 KiB chunks without draining, which is what a burst of packets arriving faster than they are consumed looks like, drops from about 185 seconds to about 72 milliseconds. The steady drained case costs about 25% more, roughly 162 ms to 202 ms over 20k packets of 32 KiB, because `consume()` now returns a copy rather than an alias into a buffer a later `add()` may reallocate; both figures are around 3 GB/s, so neither is visible next to a network [#231].
+- Removed the dead `MinChunkSize` stream transformer and two stale markers in `ssh_mac_type.dart`, neither of which anything referenced [#231].
 
 ## [3.3.1] - 2026-08-19
 - Removed the background isolate offload from X25519 and NIST curve key exchange, which cost more than the work it was hiding. Generating an ephemeral key or computing the shared secret on these curves is one fixed-size scalar multiply, well under a millisecond, while `Isolate.run` takes several times that to spawn and tear down, and a client pays it twice per handshake. On a memory constrained Android device the spawn delay was long enough for the server to time out the key exchange and close the connection before `SSH_MSG_NEWKEYS` went out, surfacing as `SSHAuthAbortError` with a null reason [#226]. Thanks [@cesarcamps].
@@ -409,6 +411,7 @@
 [#226]: https://github.com/vicajilau/dartssh2/issues/226
 [#229]: https://github.com/vicajilau/dartssh2/pull/229
 [#230]: https://github.com/vicajilau/dartssh2/pull/230
+[#231]: https://github.com/vicajilau/dartssh2/pull/231
 
 [@linhanyu]: https://github.com/linhanyu
 [@Migarl]: https://github.com/Migarl
