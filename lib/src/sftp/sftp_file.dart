@@ -438,30 +438,97 @@ class SftpFile {
   /// Writes [stream] to the file starting at [offset].
   ///
   /// Returns a [SftpFileWriter] that can be used to control the write
-  /// operation or wait for it to complete.
+  /// operation or wait for it to complete. [chunkSize] controls individual
+  /// WRITE packet sizes and [maxPendingRequests] bounds the number waiting for
+  /// acknowledgement.
   SftpFileWriter write(
     Stream<Uint8List> stream, {
     int offset = 0,
     void Function(int total)? onProgress,
+    int chunkSize = defaultChunkSize,
+    int maxPendingRequests = defaultMaxPendingRequests,
   }) {
-    return SftpFileWriter(this, stream, offset, onProgress);
+    return SftpFileWriter(
+      this,
+      stream,
+      offset,
+      onProgress,
+      chunkSize: chunkSize,
+      maxPendingRequests: maxPendingRequests,
+    );
   }
 
   /// Writes [data] to the file starting at [offset].
-  Future<void> writeBytes(Uint8List data, {int offset = 0}) async {
+  ///
+  /// At most [maxPendingRequests] writes are sent without an acknowledgement.
+  /// If a write fails, no new requests are sent and all requests already in
+  /// flight are drained before the first error is reported.
+  Future<void> writeBytes(
+    Uint8List data, {
+    int offset = 0,
+    int chunkSize = defaultChunkSize,
+    int maxPendingRequests = defaultMaxPendingRequests,
+  }) async {
     _mustNotBeClosed();
-    const maxChunkSize = 16 * 1024;
-    var bytesSent = 0;
-    final futures = <Future<void>>[];
-    while (bytesSent < data.length) {
-      final chunkSize = min(data.length - bytesSent, maxChunkSize);
-      final chunkBegin = bytesSent;
-      final chunkEnd = chunkBegin + chunkSize;
-      final chunk = Uint8List.sublistView(data, chunkBegin, chunkEnd);
-      futures.add(_writeChunk(chunk, offset: offset + bytesSent));
-      bytesSent += chunkSize;
+    if (offset < 0) {
+      throw ArgumentError.value(offset, 'offset', 'must not be negative');
     }
-    await Future.wait(futures);
+    if (chunkSize <= 0) {
+      throw ArgumentError.value(chunkSize, 'chunkSize', 'must be positive');
+    }
+    if (maxPendingRequests <= 0) {
+      throw ArgumentError.value(
+        maxPendingRequests,
+        'maxPendingRequests',
+        'must be positive',
+      );
+    }
+
+    var bytesScheduled = 0;
+    var nextWriteId = 0;
+    final pending = <int, Future<_WriteCompletion>>{};
+    Object? firstError;
+    StackTrace? firstErrorStackTrace;
+
+    void scheduleWrite() {
+      final writeId = nextWriteId++;
+      final length = min(chunkSize, data.length - bytesScheduled);
+      final chunk = Uint8List.sublistView(
+        data,
+        bytesScheduled,
+        bytesScheduled + length,
+      );
+      final writeOffset = offset + bytesScheduled;
+      bytesScheduled += length;
+
+      pending[writeId] = _writeChunk(chunk, offset: writeOffset).then(
+        (_) => _WriteCompletion(writeId),
+        onError: (Object error, StackTrace stackTrace) {
+          firstError ??= error;
+          firstErrorStackTrace ??= stackTrace;
+          return _WriteCompletion(writeId);
+        },
+      );
+    }
+
+    while (bytesScheduled < data.length && firstError == null) {
+      while (
+          bytesScheduled < data.length && pending.length < maxPendingRequests) {
+        scheduleWrite();
+      }
+
+      final completed = await Future.any(pending.values);
+      pending.remove(completed.id);
+    }
+
+    while (pending.isNotEmpty) {
+      final completed = await Future.any(pending.values);
+      pending.remove(completed.id);
+    }
+
+    if (firstError != null) {
+      Error.throwWithStackTrace(firstError!, firstErrorStackTrace!);
+    }
   }
 
   /// Gets filesystem statistics that this file is on.
@@ -531,4 +598,10 @@ class _ReadCompletion {
 
   final int startOffset;
   final Uint8List? chunk;
+}
+
+class _WriteCompletion {
+  _WriteCompletion(this.id);
+
+  final int id;
 }
