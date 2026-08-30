@@ -11,6 +11,7 @@ import 'package:dartssh2/src/utils/stream.dart';
 const defaultChunkSize = 16 * 1024;
 
 /// The amount of data historically sent in a single SFTP packet.
+@Deprecated('Use defaultChunkSize instead. Will be removed in 4.0.0.')
 const chunkSize = defaultChunkSize;
 
 /// The default maximum number of unacknowledged SFTP write requests.
@@ -20,9 +21,15 @@ const defaultMaxPendingRequests = 64;
 
 /// The byte equivalent of the default request window.
 ///
-/// Retained for compatibility with code that used the previous byte-based
-/// flow-control constant. New code should configure [defaultMaxPendingRequests]
-/// through [SftpFile.write] or [SftpFile.writeBytes].
+/// Nothing reads this any more. Uploads are bounded by a count of outstanding
+/// requests rather than by a byte window, so this describes a mechanism that no
+/// longer exists and is kept only so existing references still compile.
+/// Configure [defaultMaxPendingRequests] through [SftpFile.write] or
+/// [SftpFile.writeBytes] instead.
+@Deprecated(
+  'Uploads are bounded by outstanding request count, not by a byte window. '
+  'Use defaultMaxPendingRequests instead. Will be removed in 4.0.0.',
+)
 const maxBytesOnTheWire = defaultChunkSize * defaultMaxPendingRequests;
 
 /// Holds the state of a streaming write operation from [stream] to [file].
