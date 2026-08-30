@@ -8,6 +8,7 @@
 - Added validation of the peer's public value in every key exchange. Finite field Diffie-Hellman now requires `1 < f < p - 1`, the NIST curves reject points that fail to decode, lie off the curve or are the point at infinity, and X25519 rejects small-order points via the RFC 8731 §3 all-zero shared secret check and requires the key to be exactly 32 bytes. Without these a peer could force a shared secret it knew in advance [#229].
 - Added the missing lower bound and AEAD path checks to packet length validation, and made a zero-length payload raise `SSHPacketError` instead of a `RangeError` that no `SSHError` handler would catch [#229].
 - Changed the non-ETM receive path to verify the MAC before parsing the padding, so a forged packet is rejected before its length fields are trusted [#229].
+- Fixed the non-ETM receive path accepting a packet whose encrypted length is not a multiple of the cipher block size. The decrypt loop pulled whole blocks until it had enough, so an unaligned length made it read past the ciphertext and on into the MAC, and the `RangeError` that followed was not an `SSHError` any handler would catch. The length is now rejected up front, as OpenSSH does in `ssh_packet_read_poll2()`, and the remaining ciphertext is decrypted in one pass instead of a block at a time [#234]. Thanks [@GT-610].
 - Fixed `SSH_MSG_KEX_ECDH_REPLY` being encoded with its fields in the wrong order. RFC 5656 §4 specifies `K_S, Q_S, signature`, which is what this library's own decoder already expected, so only a peer decoding what dartssh2 sent as a server was affected [#229].
 - Fixed `writeMpint(BigInt.zero)` emitting `00 00 00 01 00` where RFC 4251 §5 requires a zero-length string, and `readNameList` returning `['']` for an empty name-list [#229].
 - Documented that leaving `onVerifyHostKey` null accepts any host key, which makes the connection trivially interceptable. The parameter is optional and the behaviour was not stated anywhere [#229].
@@ -411,6 +412,7 @@
 [#226]: https://github.com/vicajilau/dartssh2/issues/226
 [#229]: https://github.com/vicajilau/dartssh2/pull/229
 [#230]: https://github.com/vicajilau/dartssh2/pull/230
+[#234]: https://github.com/vicajilau/dartssh2/pull/234
 
 [@linhanyu]: https://github.com/linhanyu
 [@Migarl]: https://github.com/Migarl
