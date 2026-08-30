@@ -1,3 +1,8 @@
+// Uses dart:io for ssh-keygen interoperability and for writing the key to a
+// file with restricted permissions, so it cannot run under the web job.
+@TestOn('vm')
+library;
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
