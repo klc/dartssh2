@@ -1,10 +1,12 @@
-## [3.4.0] - Unreleased
-- **Behaviour change.** Removed the legacy algorithms from the default proposals, leaving them implemented but off unless asked for: the SHA-1 key exchange methods `diffie-hellman-group14-sha1` and `diffie-hellman-group-exchange-sha1`, the `ssh-rsa` host key signature, and the `aes256-cbc` and `aes128-cbc` ciphers. This matches what OpenSSH proposes in `myproposal.h`, which drops all of them and keeps only `hmac-sha1` at the end of the MAC list, as this does. `ssh-rsa` signs host keys with SHA-1 and is open to chosen-prefix collisions, which is why OpenSSH disabled it by default in 8.8, and CBC in SSH is vulnerable to the plaintext recovery of CVE-2008-5161. A server that offers nothing but these will now fail to negotiate rather than connect weakly, which for older routers, NAS boxes and embedded servers is a real change: pass the algorithm through `SSHAlgorithms` to keep talking to it [#236]. Thanks [@GT-610].
+## [4.0.0] - 2026-08-31
+- **Breaking change.** Removed the legacy algorithms from the default proposals, leaving them implemented but off unless asked for: the SHA-1 key exchange methods `diffie-hellman-group14-sha1` and `diffie-hellman-group-exchange-sha1`, the `ssh-rsa` host key signature, and the `aes256-cbc` and `aes128-cbc` ciphers. This matches what OpenSSH proposes in `myproposal.h`, which drops all of them and keeps only `hmac-sha1` at the end of the MAC list, as this does. `ssh-rsa` signs host keys with SHA-1 and is open to chosen-prefix collisions, which is why OpenSSH disabled it by default in 8.8, and CBC in SSH is vulnerable to the plaintext recovery of CVE-2008-5161. A server that offers nothing but these will now fail to negotiate rather than connect weakly, which for older routers, NAS boxes and embedded servers is a real change: pass the algorithm through `SSHAlgorithms` to keep talking to it [#236]. Thanks [@GT-610].
 - Changed SFTP uploads to pipeline a bounded number of outstanding write requests, 64 by default, matching OpenSSH's `DEFAULT_NUM_REQUESTS`. Writes were issued and awaited one at a time, so every chunk cost a full round trip and a high latency link spent most of its time idle. Acknowledgements are now accepted out of order without resubmitting an offset, and offsets are still assigned in stream order so concurrent writes cannot overlap. `SftpFile.write` and `SftpFileWriter` take `chunkSize` and `maxPendingRequests`, and reject a negative offset or a non-positive setting rather than misbehaving later [#237]. Thanks [@GT-610].
 - Changed a failing SFTP upload to stop scheduling new writes, drain the ones already in flight and report the first error through the returned future, instead of surfacing whichever error happened to arrive last. This supersedes the narrower `SftpFileWriter` error handling added in #230, whose regression tests all still pass [#237].
 - Deprecated `chunkSize` in favour of `defaultChunkSize`, and `maxBytesOnTheWire`, which nothing reads any more now that uploads are bounded by request count rather than by a byte window [#237].
-- **Behaviour change.** `SftpFileAttrs` now drops a `uidgid` or `acmodtime` pair when only one half of it is set, instead of writing the flag with a single value. The pair is two fields under one flag in the SFTP wire format, so a half-filled one produced a packet the server misparsed, applying the wrong ownership or timestamps. Anyone calling `setStat` with only `modifyTime` set will find the value is now ignored rather than sent alongside a garbage access time; set both to change either [#230]. Thanks [@klc].
-- **Behaviour change.** A host key that changes during a rekey now terminates the connection with `SSHHostkeyError`, as OpenSSH does. The signature was already re-checked on every exchange, but that only proved the key presented was self-consistent, not that it was the key `onVerifyHostKey` had already approved, so a server could hand out one key at connect time and a different one on the first rekey. A connection that used to survive this will now drop. `onVerifyHostKey` is consulted once per connection, not once per exchange [#229]. Thanks [@klc].
+- Removed the legacy analyzer plugin entry from `analysis_options.yaml`. Dart 3.13.2 warns on it and `dart analyze` exits non-zero on a warning, so every job on every branch started failing with nothing in the code having changed. It was dead configuration in any case: `dart_code_metrics_presets` ships preset YAML meant for `include:`, no analyzer plugin, so nothing was ever loaded through it. The now unused dev dependency went with it [#232] [#233].
+- Scoped the encrypted key tests to the VM. They use `dart:io` for their `ssh-keygen` interoperability checks, which the web job cannot load [#239].
+- **Breaking change.** `SftpFileAttrs` now drops a `uidgid` or `acmodtime` pair when only one half of it is set, instead of writing the flag with a single value. The pair is two fields under one flag in the SFTP wire format, so a half-filled one produced a packet the server misparsed, applying the wrong ownership or timestamps. Anyone calling `setStat` with only `modifyTime` set will find the value is now ignored rather than sent alongside a garbage access time; set both to change either [#230]. Thanks [@klc].
+- **Breaking change.** A host key that changes during a rekey now terminates the connection with `SSHHostkeyError`, as OpenSSH does. The signature was already re-checked on every exchange, but that only proved the key presented was self-consistent, not that it was the key `onVerifyHostKey` had already approved, so a server could hand out one key at connect time and a different one on the first rekey. A connection that used to survive this will now drop. `onVerifyHostKey` is consulted once per connection, not once per exchange [#229]. Thanks [@klc].
 - Fixed the version exchange failing when the banner arrives split across TCP segments or WebSocket frames. It was treated as a framing error rather than a partial read, which made the WebSocket transport the README recommends for web unreliable by construction, and any slow or proxied connection intermittently so. Lines of text sent before the identification line are also skipped now, which RFC 4253 §4.2 says clients MUST be able to process; at most 1024 of them, matching OpenSSH, so a server streaming them forever cannot keep a client busy [#229].
 - Fixed `keyboard-interactive` responses being written to the trace log in plaintext, which put the user's password in any log a caller collected with `printTrace` set [#229].
 - Changed MAC comparison to constant time, and removed both the received and the expected MAC from the failure message [#229].
@@ -339,43 +341,56 @@
 
 - Initial release.
 
-[#165]: https://github.com/vicajilau/dartssh2/issues/165
-[#141]: https://github.com/vicajilau/dartssh2/pull/141
-[#140]: https://github.com/vicajilau/dartssh2/pull/140
-[#145]: https://github.com/vicajilau/dartssh2/pull/145
-[#153]: https://github.com/vicajilau/dartssh2/pull/153
-[#157]: https://github.com/vicajilau/dartssh2/pull/157
-[#102]: https://github.com/vicajilau/dartssh2/issues/102
-[#99]: https://github.com/vicajilau/dartssh2/issues/99
-[#109]: https://github.com/vicajilau/dartssh2/issues/109
-[#121]: https://github.com/vicajilau/dartssh2/issues/121
-[#124]: https://github.com/vicajilau/dartssh2/issues/124
-[#95]: https://github.com/vicajilau/dartssh2/issues/95
-[#88]: https://github.com/vicajilau/dartssh2/issues/88
+[#1]: https://github.com/TerminalStudio/dartssh/pull/1/files
+[#14]: https://github.com/vicajilau/dartssh2/pull/14
+[#17]: https://github.com/vicajilau/dartssh2/issues/17
+[#18]: https://github.com/vicajilau/dartssh2/issues/18
+[#21]: https://github.com/vicajilau/dartssh2/issues/21
+[#23]: https://github.com/vicajilau/dartssh2/issues/23
+[#24]: https://github.com/vicajilau/dartssh2/issues/24
 [#26]: https://github.com/vicajilau/dartssh2/issues/26
-[#139]: https://github.com/vicajilau/dartssh2/pull/139
+[#50]: https://github.com/vicajilau/dartssh2/issues/50
+[#71]: https://github.com/vicajilau/dartssh2/issues/71
+[#80]: https://github.com/vicajilau/dartssh2/issues/80
+[#88]: https://github.com/vicajilau/dartssh2/issues/88
+[#95]: https://github.com/vicajilau/dartssh2/issues/95
+[#99]: https://github.com/vicajilau/dartssh2/issues/99
+[#100]: https://github.com/vicajilau/dartssh2/issues/100
+[#101]: https://github.com/vicajilau/dartssh2/pull/101
+[#102]: https://github.com/vicajilau/dartssh2/issues/102
+[#109]: https://github.com/vicajilau/dartssh2/issues/109
+[#115]: https://github.com/vicajilau/dartssh2/pull/115
+[#116]: https://github.com/vicajilau/dartssh2/issues/116
+[#121]: https://github.com/vicajilau/dartssh2/issues/121
+[#123]: https://github.com/vicajilau/dartssh2/pull/123
+[#124]: https://github.com/vicajilau/dartssh2/issues/124
+[#125]: https://github.com/vicajilau/dartssh2/pull/125
+[#126]: https://github.com/vicajilau/dartssh2/pull/126
+[#127]: https://github.com/vicajilau/dartssh2/pull/127
+[#131]: https://github.com/vicajilau/dartssh2/pull/131
 [#132]: https://github.com/vicajilau/dartssh2/pull/132
 [#133]: https://github.com/vicajilau/dartssh2/pull/133
 [#135]: https://github.com/vicajilau/dartssh2/pull/135
-[#131]: https://github.com/vicajilau/dartssh2/pull/131
-[#127]: https://github.com/vicajilau/dartssh2/pull/127
-[#126]: https://github.com/vicajilau/dartssh2/pull/126
-[#125]: https://github.com/vicajilau/dartssh2/pull/125
-[#123]: https://github.com/vicajilau/dartssh2/pull/123
-[#101]: https://github.com/vicajilau/dartssh2/pull/101
-[#100]: https://github.com/vicajilau/dartssh2/issues/100
-[#80]: https://github.com/vicajilau/dartssh2/issues/80
-[#71]: https://github.com/vicajilau/dartssh2/issues/71
-[#50]: https://github.com/vicajilau/dartssh2/issues/50
-[#24]: https://github.com/vicajilau/dartssh2/issues/24
-[#23]: https://github.com/vicajilau/dartssh2/issues/23
-[#21]: https://github.com/vicajilau/dartssh2/issues/21
-[#18]: https://github.com/vicajilau/dartssh2/issues/18
-[#17]: https://github.com/vicajilau/dartssh2/issues/17
-[#14]: https://github.com/vicajilau/dartssh2/pull/14
+[#139]: https://github.com/vicajilau/dartssh2/pull/139
+[#140]: https://github.com/vicajilau/dartssh2/pull/140
+[#141]: https://github.com/vicajilau/dartssh2/pull/141
+[#145]: https://github.com/vicajilau/dartssh2/pull/145
+[#153]: https://github.com/vicajilau/dartssh2/pull/153
+[#157]: https://github.com/vicajilau/dartssh2/pull/157
+[#162]: https://github.com/vicajilau/dartssh2/pull/162
+[#165]: https://github.com/vicajilau/dartssh2/issues/165
+[#168]: https://github.com/vicajilau/dartssh2/issues/168
+[#170]: https://github.com/vicajilau/dartssh2/pull/170
+[#171]: https://github.com/vicajilau/dartssh2/pull/171
+[#172]: https://github.com/vicajilau/dartssh2/pull/172
+[#173]: https://github.com/vicajilau/dartssh2/pull/173
 [#175]: https://github.com/vicajilau/dartssh2/pull/175
 [#176]: https://github.com/vicajilau/dartssh2/pull/176
-[#1]: https://github.com/TerminalStudio/dartssh/pull/1/files
+[#179]: https://github.com/vicajilau/dartssh2/pull/179
+[#182]: https://github.com/vicajilau/dartssh2/pull/182
+[#183]: https://github.com/vicajilau/dartssh2/issues/183
+[#186]: https://github.com/vicajilau/dartssh2/pull/186
+[#187]: https://github.com/vicajilau/dartssh2/pull/187
 [#188]: https://github.com/vicajilau/dartssh2/issues/188
 [#190]: https://github.com/vicajilau/dartssh2/issues/190
 [#193]: https://github.com/vicajilau/dartssh2/pull/193
@@ -388,19 +403,6 @@
 [#200]: https://github.com/vicajilau/dartssh2/pull/200
 [#201]: https://github.com/vicajilau/dartssh2/pull/201
 [#203]: https://github.com/vicajilau/dartssh2/pull/203
-[#115]: https://github.com/vicajilau/dartssh2/pull/115
-[#116]: https://github.com/vicajilau/dartssh2/issues/116
-[#162]: https://github.com/vicajilau/dartssh2/pull/162
-[#168]: https://github.com/vicajilau/dartssh2/issues/168
-[#170]: https://github.com/vicajilau/dartssh2/pull/170
-[#171]: https://github.com/vicajilau/dartssh2/pull/171
-[#172]: https://github.com/vicajilau/dartssh2/pull/172
-[#173]: https://github.com/vicajilau/dartssh2/pull/173
-[#179]: https://github.com/vicajilau/dartssh2/pull/179
-[#182]: https://github.com/vicajilau/dartssh2/pull/182
-[#183]: https://github.com/vicajilau/dartssh2/issues/183
-[#186]: https://github.com/vicajilau/dartssh2/pull/186
-[#187]: https://github.com/vicajilau/dartssh2/pull/187
 [#207]: https://github.com/vicajilau/dartssh2/pull/207
 [#210]: https://github.com/vicajilau/dartssh2/pull/210
 [#212]: https://github.com/vicajilau/dartssh2/pull/212
@@ -418,10 +420,13 @@
 [#226]: https://github.com/vicajilau/dartssh2/issues/226
 [#229]: https://github.com/vicajilau/dartssh2/pull/229
 [#230]: https://github.com/vicajilau/dartssh2/pull/230
+[#232]: https://github.com/vicajilau/dartssh2/pull/232
+[#233]: https://github.com/vicajilau/dartssh2/pull/233
 [#234]: https://github.com/vicajilau/dartssh2/pull/234
 [#235]: https://github.com/vicajilau/dartssh2/pull/235
 [#236]: https://github.com/vicajilau/dartssh2/pull/236
 [#237]: https://github.com/vicajilau/dartssh2/pull/237
+[#239]: https://github.com/vicajilau/dartssh2/pull/239
 
 [@linhanyu]: https://github.com/linhanyu
 [@Migarl]: https://github.com/Migarl
