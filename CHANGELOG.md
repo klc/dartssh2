@@ -1,4 +1,7 @@
 ## [3.4.0] - Unreleased
+- Changed SFTP uploads to pipeline a bounded number of outstanding write requests, 64 by default, matching OpenSSH's `DEFAULT_NUM_REQUESTS`. Writes were issued and awaited one at a time, so every chunk cost a full round trip and a high latency link spent most of its time idle. Acknowledgements are now accepted out of order without resubmitting an offset, and offsets are still assigned in stream order so concurrent writes cannot overlap. `SftpFile.write` and `SftpFileWriter` take `chunkSize` and `maxPendingRequests`, and reject a negative offset or a non-positive setting rather than misbehaving later [#237]. Thanks [@GT-610].
+- Changed a failing SFTP upload to stop scheduling new writes, drain the ones already in flight and report the first error through the returned future, instead of surfacing whichever error happened to arrive last. This supersedes the narrower `SftpFileWriter` error handling added in #230, whose regression tests all still pass [#237].
+- Deprecated `chunkSize` in favour of `defaultChunkSize`, and `maxBytesOnTheWire`, which nothing reads any more now that uploads are bounded by request count rather than by a byte window [#237].
 - **Behaviour change.** `SftpFileAttrs` now drops a `uidgid` or `acmodtime` pair when only one half of it is set, instead of writing the flag with a single value. The pair is two fields under one flag in the SFTP wire format, so a half-filled one produced a packet the server misparsed, applying the wrong ownership or timestamps. Anyone calling `setStat` with only `modifyTime` set will find the value is now ignored rather than sent alongside a garbage access time; set both to change either [#230]. Thanks [@klc].
 - **Behaviour change.** A host key that changes during a rekey now terminates the connection with `SSHHostkeyError`, as OpenSSH does. The signature was already re-checked on every exchange, but that only proved the key presented was self-consistent, not that it was the key `onVerifyHostKey` had already approved, so a server could hand out one key at connect time and a different one on the first rekey. A connection that used to survive this will now drop. `onVerifyHostKey` is consulted once per connection, not once per exchange [#229]. Thanks [@klc].
 - Fixed the version exchange failing when the banner arrives split across TCP segments or WebSocket frames. It was treated as a framing error rather than a partial read, which made the WebSocket transport the README recommends for web unreliable by construction, and any slow or proxied connection intermittently so. Lines of text sent before the identification line are also skipped now, which RFC 4253 §4.2 says clients MUST be able to process; at most 1024 of them, matching OpenSSH, so a server streaming them forever cannot keep a client busy [#229].
@@ -416,6 +419,7 @@
 [#230]: https://github.com/vicajilau/dartssh2/pull/230
 [#234]: https://github.com/vicajilau/dartssh2/pull/234
 [#235]: https://github.com/vicajilau/dartssh2/pull/235
+[#237]: https://github.com/vicajilau/dartssh2/pull/237
 
 [@linhanyu]: https://github.com/linhanyu
 [@Migarl]: https://github.com/Migarl
