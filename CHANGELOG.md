@@ -1,4 +1,5 @@
 ## [3.4.0] - Unreleased
+- **Behaviour change.** Removed the legacy algorithms from the default proposals, leaving them implemented but off unless asked for: the SHA-1 key exchange methods `diffie-hellman-group14-sha1` and `diffie-hellman-group-exchange-sha1`, the `ssh-rsa` host key signature, and the `aes256-cbc` and `aes128-cbc` ciphers. This matches what OpenSSH proposes in `myproposal.h`, which drops all of them and keeps only `hmac-sha1` at the end of the MAC list, as this does. `ssh-rsa` signs host keys with SHA-1 and is open to chosen-prefix collisions, which is why OpenSSH disabled it by default in 8.8, and CBC in SSH is vulnerable to the plaintext recovery of CVE-2008-5161. A server that offers nothing but these will now fail to negotiate rather than connect weakly, which for older routers, NAS boxes and embedded servers is a real change: pass the algorithm through `SSHAlgorithms` to keep talking to it [#236]. Thanks [@GT-610].
 - Changed SFTP uploads to pipeline a bounded number of outstanding write requests, 64 by default, matching OpenSSH's `DEFAULT_NUM_REQUESTS`. Writes were issued and awaited one at a time, so every chunk cost a full round trip and a high latency link spent most of its time idle. Acknowledgements are now accepted out of order without resubmitting an offset, and offsets are still assigned in stream order so concurrent writes cannot overlap. `SftpFile.write` and `SftpFileWriter` take `chunkSize` and `maxPendingRequests`, and reject a negative offset or a non-positive setting rather than misbehaving later [#237]. Thanks [@GT-610].
 - Changed a failing SFTP upload to stop scheduling new writes, drain the ones already in flight and report the first error through the returned future, instead of surfacing whichever error happened to arrive last. This supersedes the narrower `SftpFileWriter` error handling added in #230, whose regression tests all still pass [#237].
 - Deprecated `chunkSize` in favour of `defaultChunkSize`, and `maxBytesOnTheWire`, which nothing reads any more now that uploads are bounded by request count rather than by a byte window [#237].
@@ -419,6 +420,7 @@
 [#230]: https://github.com/vicajilau/dartssh2/pull/230
 [#234]: https://github.com/vicajilau/dartssh2/pull/234
 [#235]: https://github.com/vicajilau/dartssh2/pull/235
+[#236]: https://github.com/vicajilau/dartssh2/pull/236
 [#237]: https://github.com/vicajilau/dartssh2/pull/237
 
 [@linhanyu]: https://github.com/linhanyu

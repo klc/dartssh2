@@ -135,8 +135,6 @@ void main() {
           SSHKexType.nistp256,
           SSHKexType.dhGexSha256,
           SSHKexType.dh14Sha256,
-          SSHKexType.dh14Sha1,
-          SSHKexType.dhGexSha1,
         ]));
 
     expect(
@@ -148,7 +146,6 @@ void main() {
           SSHHostkeyType.ecdsa521,
           SSHHostkeyType.ecdsa384,
           SSHHostkeyType.ecdsa256,
-          SSHHostkeyType.rsaSha1,
         ]));
 
     expect(
@@ -159,8 +156,6 @@ void main() {
           SSHCipherType.chacha20poly1305,
           SSHCipherType.aes256ctr,
           SSHCipherType.aes128ctr,
-          SSHCipherType.aes256cbc,
-          SSHCipherType.aes128cbc,
         ]));
 
     expect(
@@ -177,14 +172,12 @@ void main() {
   group('Default algorithm preferences', () {
     final algorithms = SSHAlgorithms();
 
-    test('prefer AEAD over CTR, and CTR over CBC', () {
+    test('prefer AEAD over CTR', () {
       final names = algorithms.cipher.toNameList();
-      final firstCbc = names.indexWhere((name) => name.endsWith('-cbc'));
       final lastCtr = names.lastIndexWhere((name) => name.endsWith('-ctr'));
       final lastGcm = names.lastIndexWhere((name) => name.contains('gcm'));
 
       expect(lastGcm, lessThan(lastCtr));
-      expect(lastCtr, lessThan(firstCbc));
     });
 
     test('prefer encrypt-then-MAC over encrypt-and-MAC', () {
@@ -200,11 +193,31 @@ void main() {
       expect(algorithms.mac, isNot(contains(SSHMacType.hmacSha256_96)));
       expect(algorithms.mac, isNot(contains(SSHMacType.hmacSha512_96)));
       expect(algorithms.kex, isNot(contains(SSHKexType.dh1Sha1)));
+      expect(algorithms.kex, isNot(contains(SSHKexType.dh14Sha1)));
+      expect(algorithms.kex, isNot(contains(SSHKexType.dhGexSha1)));
+      expect(algorithms.hostkey, isNot(contains(SSHHostkeyType.rsaSha1)));
+      expect(algorithms.cipher, isNot(contains(SSHCipherType.aes128cbc)));
+      expect(algorithms.cipher, isNot(contains(SSHCipherType.aes256cbc)));
     });
 
-    test('keep SHA-1 based algorithms last as a fallback', () {
+    test('keep hmac-sha1 last for OpenSSH compatibility', () {
       expect(algorithms.mac.last, SSHMacType.hmacSha1);
-      expect(algorithms.hostkey.last, SSHHostkeyType.rsaSha1);
+    });
+
+    test('legacy algorithms remain available through explicit configuration',
+        () {
+      const legacy = SSHAlgorithms(
+        kex: [SSHKexType.dh14Sha1, SSHKexType.dhGexSha1],
+        hostkey: [SSHHostkeyType.rsaSha1],
+        cipher: [SSHCipherType.aes128cbc, SSHCipherType.aes256cbc],
+      );
+
+      expect(legacy.kex, [SSHKexType.dh14Sha1, SSHKexType.dhGexSha1]);
+      expect(legacy.hostkey, [SSHHostkeyType.rsaSha1]);
+      expect(
+        legacy.cipher,
+        [SSHCipherType.aes128cbc, SSHCipherType.aes256cbc],
+      );
     });
   });
 }
