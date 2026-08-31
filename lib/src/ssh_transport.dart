@@ -1012,10 +1012,22 @@ class SSHTransport {
         return null;
       }
 
-      while (_decryptBuffer.length < 4 + packetLength) {
-        // Same as firstBlock above: read synchronously, never stored.
-        final block = _buffer.consumeView(blockSize);
-        _decryptBuffer.add(_decryptCipher!.process(block));
+      final encryptedPacketLength = 4 + packetLength;
+      if (encryptedPacketLength % blockSize != 0) {
+        throw SSHPacketError(
+          'Encrypted packet length $encryptedPacketLength is not a multiple '
+          'of block size $blockSize',
+        );
+      }
+
+      final remaining = encryptedPacketLength - _decryptBuffer.length;
+      if (remaining > 0) {
+        // Same as firstBlock above: processAll reads this synchronously into
+        // a fresh array and never stores it, so a view is safe and saves
+        // copying the rest of the packet.
+        _decryptBuffer.add(
+          _decryptCipher!.processAll(_buffer.consumeView(remaining)),
+        );
       }
 
       // A view is safe here: _decryptBuffer only ever holds the decrypted
