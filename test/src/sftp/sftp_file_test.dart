@@ -275,6 +275,220 @@ void main() {
       harness.dispose();
     });
 
+    test('writeBytes rejects invalid pipeline settings', () async {
+      final harness = _SftpTestHarness();
+      await harness.completeHandshake();
+      final file = SftpFile(harness.client, Uint8List.fromList([1]));
+      final data = Uint8List(1);
+
+      await expectLater(
+        file.writeBytes(data, offset: -1),
+        throwsArgumentError,
+      );
+      await expectLater(
+        file.writeBytes(data, chunkSize: 0),
+        throwsArgumentError,
+      );
+      await expectLater(
+        file.writeBytes(data, maxPendingRequests: 0),
+        throwsArgumentError,
+      );
+
+      expect(
+        () => file.write(Stream.value(data), offset: -1),
+        throwsArgumentError,
+      );
+      expect(
+        () => file.write(Stream.value(data), chunkSize: 0),
+        throwsArgumentError,
+      );
+      expect(
+        () => file.write(Stream.value(data), maxPendingRequests: 0),
+        throwsArgumentError,
+      );
+
+      harness.dispose();
+    });
+
+    test('writeBytes bounds requests and accepts out-of-order replies',
+        () async {
+      final harness = _SftpTestHarness();
+      await harness.completeHandshake();
+      final file = SftpFile(harness.client, Uint8List.fromList([1]));
+      final packetCountBeforeWrite = harness.outgoingPackets.length;
+      final firstTwoFuture = harness.nextOutgoingPackets(2);
+
+      final writeFuture = file.writeBytes(
+        Uint8List.fromList([10, 20, 30, 40, 50]),
+        chunkSize: 1,
+        maxPendingRequests: 2,
+      );
+      final firstTwo = (await firstTwoFuture)
+          .map(SftpWritePacket.decode)
+          .toList(growable: false);
+
+      expect(firstTwo.map((packet) => packet.offset), [0, 1]);
+      await pumpEventQueue();
+      expect(harness.outgoingPackets.length - packetCountBeforeWrite, 2);
+
+      final thirdFuture = harness.nextOutgoingPacket();
+      _replyToWrite(harness, firstTwo[1]);
+      final third = SftpWritePacket.decode(await thirdFuture);
+      expect(third.offset, 2);
+
+      final fourthFuture = harness.nextOutgoingPacket();
+      _replyToWrite(harness, firstTwo[0]);
+      final fourth = SftpWritePacket.decode(await fourthFuture);
+      expect(fourth.offset, 3);
+
+      final fifthFuture = harness.nextOutgoingPacket();
+      _replyToWrite(harness, third);
+      final fifth = SftpWritePacket.decode(await fifthFuture);
+      expect(fifth.offset, 4);
+
+      _replyToWrite(harness, fourth);
+      _replyToWrite(harness, fifth);
+      await writeFuture;
+
+      harness.dispose();
+    });
+
+    test(
+        'writeBytes stops scheduling after an error and drains in-flight writes',
+        () async {
+      final harness = _SftpTestHarness();
+      await harness.completeHandshake();
+      final file = SftpFile(harness.client, Uint8List.fromList([1]));
+      final packetCountBeforeWrite = harness.outgoingPackets.length;
+      final firstTwoFuture = harness.nextOutgoingPackets(2);
+
+      final writeFuture = file.writeBytes(
+        Uint8List.fromList([1, 2, 3, 4, 5]),
+        chunkSize: 1,
+        maxPendingRequests: 2,
+      );
+      final firstTwo = (await firstTwoFuture)
+          .map(SftpWritePacket.decode)
+          .toList(growable: false);
+
+      _replyToWrite(
+        harness,
+        firstTwo[0],
+        code: SftpStatusCode.failure,
+      );
+      await pumpEventQueue();
+      expect(harness.outgoingPackets.length - packetCountBeforeWrite, 2);
+
+      final errorExpectation = expectLater(
+        writeFuture,
+        throwsA(isA<SftpStatusError>()),
+      );
+      _replyToWrite(harness, firstTwo[1]);
+      await errorExpectation;
+      expect(harness.outgoingPackets.length - packetCountBeforeWrite, 2);
+
+      harness.dispose();
+    });
+
+    test('streaming writes bound requests and report acknowledged progress',
+        () async {
+      final harness = _SftpTestHarness();
+      await harness.completeHandshake();
+      final file = SftpFile(harness.client, Uint8List.fromList([1]));
+      final progress = <int>[];
+      final firstTwoFuture = harness.nextOutgoingPackets(2);
+      final writer = file.write(
+        Stream.fromIterable([
+          Uint8List.fromList([1]),
+          Uint8List.fromList([2]),
+          Uint8List.fromList([3]),
+          Uint8List.fromList([4]),
+          Uint8List.fromList([5]),
+        ]),
+        chunkSize: 1,
+        maxPendingRequests: 2,
+        onProgress: progress.add,
+      );
+      final firstTwo = (await firstTwoFuture)
+          .map(SftpWritePacket.decode)
+          .toList(growable: false);
+
+      final thirdFuture = harness.nextOutgoingPacket();
+      _replyToWrite(harness, firstTwo[1]);
+      final third = SftpWritePacket.decode(await thirdFuture);
+
+      final fourthFuture = harness.nextOutgoingPacket();
+      _replyToWrite(harness, firstTwo[0]);
+      final fourth = SftpWritePacket.decode(await fourthFuture);
+
+      final fifthFuture = harness.nextOutgoingPacket();
+      _replyToWrite(harness, third);
+      final fifth = SftpWritePacket.decode(await fifthFuture);
+
+      _replyToWrite(harness, fourth);
+      _replyToWrite(harness, fifth);
+      await writer.done;
+
+      expect(
+        [
+          firstTwo[0].offset,
+          firstTwo[1].offset,
+          third.offset,
+          fourth.offset,
+          fifth.offset
+        ],
+        [0, 1, 2, 3, 4],
+      );
+      expect(progress, [1, 2, 3, 4, 5]);
+      expect(writer.progress, 5);
+
+      harness.dispose();
+    });
+
+    test('streaming write propagates source and remote errors', () async {
+      final sourceHarness = _SftpTestHarness();
+      await sourceHarness.completeHandshake();
+      final sourceFile =
+          SftpFile(sourceHarness.client, Uint8List.fromList([1]));
+      final sourceError = StateError('source failed');
+      final sourceWriter = sourceFile.write(Stream.error(sourceError));
+
+      await expectLater(sourceWriter.done, throwsA(same(sourceError)));
+      sourceHarness.dispose();
+
+      final remoteHarness = _SftpTestHarness();
+      await remoteHarness.completeHandshake();
+      final remoteFile =
+          SftpFile(remoteHarness.client, Uint8List.fromList([1]));
+      final firstTwoFuture = remoteHarness.nextOutgoingPackets(2);
+      final remoteWriter = remoteFile.write(
+        Stream.fromIterable([
+          Uint8List.fromList([1]),
+          Uint8List.fromList([2]),
+          Uint8List.fromList([3]),
+        ]),
+        chunkSize: 1,
+        maxPendingRequests: 2,
+      );
+      final firstTwo = (await firstTwoFuture)
+          .map(SftpWritePacket.decode)
+          .toList(growable: false);
+
+      _replyToWrite(
+        remoteHarness,
+        firstTwo[0],
+        code: SftpStatusCode.failure,
+      );
+      _replyToWrite(remoteHarness, firstTwo[1]);
+
+      await expectLater(
+        remoteWriter.done,
+        throwsA(isA<SftpStatusError>()),
+      );
+      expect(remoteHarness.outgoingPackets, hasLength(3));
+      remoteHarness.dispose();
+    });
+
     test('statvfs fetches filesystem stats', () async {
       final harness = _SftpTestHarness();
       await harness
@@ -393,6 +607,7 @@ class _SftpTestHarness {
   late final SftpClient client;
 
   final _outgoing = StreamController<Uint8List>.broadcast();
+  final outgoingPackets = <Uint8List>[];
   var _disposed = false;
 
   void _handleOutboundMessage(SSHMessage message) {
@@ -400,10 +615,14 @@ class _SftpTestHarness {
     final reader = SSHMessageReader(message.data);
     final length = reader.readUint32();
     final payload = reader.readBytes(length);
+    outgoingPackets.add(payload);
     _outgoing.add(payload);
   }
 
   Future<Uint8List> nextOutgoingPacket() => _outgoing.stream.first;
+
+  Future<List<Uint8List>> nextOutgoingPackets(int count) =>
+      _outgoing.stream.take(count).toList();
 
   Future<void> completeHandshake({Map<String, String>? extensions}) async {
     final init = await nextOutgoingPacket();
@@ -434,4 +653,18 @@ class _SftpTestHarness {
     _controller.destroy();
     _outgoing.close();
   }
+}
+
+void _replyToWrite(
+  _SftpTestHarness harness,
+  SftpWritePacket write, {
+  int code = SftpStatusCode.ok,
+}) {
+  harness.sendResponsePacket(
+    SftpStatusPacket(
+      requestId: write.requestId,
+      code: code,
+      message: code == SftpStatusCode.ok ? 'ok' : 'write failed',
+    ),
+  );
 }
