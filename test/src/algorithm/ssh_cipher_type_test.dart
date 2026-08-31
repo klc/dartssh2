@@ -135,8 +135,6 @@ void main() {
           SSHKexType.nistp256,
           SSHKexType.dhGexSha256,
           SSHKexType.dh14Sha256,
-          SSHKexType.dh14Sha1,
-          SSHKexType.dhGexSha1,
         ]));
 
     expect(
@@ -195,6 +193,8 @@ void main() {
       expect(algorithms.mac, isNot(contains(SSHMacType.hmacSha256_96)));
       expect(algorithms.mac, isNot(contains(SSHMacType.hmacSha512_96)));
       expect(algorithms.kex, isNot(contains(SSHKexType.dh1Sha1)));
+      expect(algorithms.kex, isNot(contains(SSHKexType.dh14Sha1)));
+      expect(algorithms.kex, isNot(contains(SSHKexType.dhGexSha1)));
       expect(algorithms.hostkey, isNot(contains(SSHHostkeyType.rsaSha1)));
       expect(algorithms.cipher, isNot(contains(SSHCipherType.aes128cbc)));
       expect(algorithms.cipher, isNot(contains(SSHCipherType.aes256cbc)));
@@ -204,24 +204,15 @@ void main() {
       expect(algorithms.mac.last, SSHMacType.hmacSha1);
     });
 
-    test('keep SHA-1 key exchange last, after every SHA-2 method', () {
-      final names = algorithms.kex.toNameList();
-      final firstSha1 = names.indexWhere((name) => name.endsWith('-sha1'));
-      final lastSha2 = names.lastIndexWhere((name) => !name.endsWith('-sha1'));
-
-      expect(firstSha1, greaterThan(lastSha2));
-      expect(algorithms.kex.last, SSHKexType.dhGexSha1);
-    });
-
     test('legacy algorithms remain available through explicit configuration',
         () {
       const legacy = SSHAlgorithms(
-        kex: [SSHKexType.dh1Sha1],
+        kex: [SSHKexType.dh14Sha1, SSHKexType.dhGexSha1],
         hostkey: [SSHHostkeyType.rsaSha1],
         cipher: [SSHCipherType.aes128cbc, SSHCipherType.aes256cbc],
       );
 
-      expect(legacy.kex, [SSHKexType.dh1Sha1]);
+      expect(legacy.kex, [SSHKexType.dh14Sha1, SSHKexType.dhGexSha1]);
       expect(legacy.hostkey, [SSHHostkeyType.rsaSha1]);
       expect(
         legacy.cipher,
